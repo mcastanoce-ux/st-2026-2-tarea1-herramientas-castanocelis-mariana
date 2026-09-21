@@ -1,0 +1,537 @@
+---
+title: "Tarea 1: caja de herramientas de pronóstico"
+subtitle: "Series de tiempo univariadas (3009297), semestre 2026-II"
+author: "Mariana Castaño Celis"
+date: today
+lang: es
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    embed-resources: true
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+---
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_chunk$set(echo = TRUE, fig.width = 8, fig.height = 4.6, dpi = 150)
+```
+
+```{r cargar}
+# Se cargan las funciones propias. 
+for (a in c("R/00-lectura.R", "R/01-graficos.R", "R/02-metodos.R", "R/03-evaluacion.R")) source(a)
+```
+
+
+# Ejemplo 1. Media simple sobre `Nile`
+
+## Descripción y patrón
+
+```{r ej1-desc}
+nile <- leer_serie(Nile,
+  fuente = "R datasets: Nile. Durbin y Koopman (2001), caudal anual del Nilo en Ashwan, 1871-1970",
+  unidad = "Caudal anual (10^8 m^3)")
+knitr::kable(describir_serie(nile, "Nile"), digits = 2)
+graficar_serie(nile, "Nile: caudal anual del río Nilo en Ashwan") 
+```
+
+```{r ej1-corr, fig.height=6.2}
+correlograma(nile, titulo = "Nile: correlograma de la serie")
+```
+
+```{r ej1-pruebas-serie}
+rh1 <- contrastar_rh(nile$y)
+knitr::kable(head(rh1, 10), digits = 4)
+lb1 <- ljung_box(acf_manual(nile$y)$r, T = nrow(nile), m = nrow(acf_manual(nile$y)), p = 0)
+invisible(reportar_prueba(lb1,
+  lectura = "La serie no es ruido blanco: hay dependencia temporal que un método de pronóstico puede aprovechar, aunque no hay tendencia sostenida."))
+```
+
+La serie oscila alrededor de un nivel sin tendencia sostenida; la ACF decae
+rápido y solo los primeros rezagos exceden la banda. Ese es el patrón que supone
+la media simple: nivel aproximadamente constante.
+
+## Ajuste, medidas y validación
+
+```{r ej1-ajuste, fig.height=6.2}
+ej1 <- protocolo_ejemplo(nile, "Nile", ajustar_media, "media simple", p = 1, imprimir = FALSE)
+knitr::kable(dplyr::bind_rows(
+  dplyr::mutate(ej1$medidas_dentro,   tramo = "estimación (un paso)"),
+  dplyr::mutate(ej1$medidas_fuera,    tramo = "validación (h pasos)"),
+  dplyr::mutate(ej1$medidas_referente,tramo = "ingenuo (validación)")), digits = 3)
+ej1$validacion$grafico_errores
+ej1$validacion$correlograma
+```
+
+```{r ej1-pruebas-errores}
+invisible(reportar_prueba(ej1$validacion$pruebas$t_media,
+  lectura = "Se examina si la media simple está sesgada sobre este tramo."))
+invisible(reportar_prueba(ej1$validacion$pruebas$ljung_box,
+  lectura = "Se examina si queda estructura temporal sin explotar en los errores de un paso."))
+invisible(reportar_prueba(ej1$validacion$pruebas$jarque_bera,
+  lectura = "Se examina la normalidad de los errores, necesaria si se quieren intervalos de pronóstico."))
+invisible(reportar_prueba(ej1$validacion$pruebas$durbin_watson,
+  lectura = "Con d por debajo de 2 hay autocorrelación positiva de primer orden; la decisión formal usa las cotas dL y dU para T y k."))
+```
+
+```{r ej1-final}
+ej1$grafico_final
+```
+
+## Conclusión y recomendación
+
+**Conclusión.** Se ajustó la media simple, sin constantes que elegir, sobre las
+`r ej1$particion$n_estimacion` primeras observaciones. Dentro del tramo de
+estimación el MSE de un paso fue `r round(ej1$medidas_dentro$MSE, 1)` y el MAD
+`r round(ej1$medidas_dentro$MAD, 1)`; sobre las `r ej1$h` observaciones de
+validación el MSE fue `r round(ej1$medidas_fuera$MSE, 1)` con
+MASE = `r round(ej1$medidas_fuera$MASE, 3)`, frente a MASE =
+`r round(ej1$medidas_referente$MASE, 3)` del pronóstico ingenuo sobre el mismo
+tramo y el mismo horizonte. La validación de errores se resume así:
+
+```{r ej1-resumen-pruebas}
+knitr::kable(ej1$validacion$resumen, digits = 4)
+```
+
+**Recomendación.** Sirve como referencia comparativa de bajo costo, no como
+pronóstico operativo: el método está significativamente sesgado
+(t = `r round(ej1$validacion$pruebas$t_media$estadistico,2)`,
+$p<0.001$),, ni siquiera supera al ingenuo sobre este
+tramo (MASE `r round(ej1$medidas_fuera$MASE,3)` contra
+`r round(ej1$medidas_referente$MASE,3)`)
+
+# Ejemplo 2. Media móvil sobre `LakeHuron`
+
+```{r ej2, fig.height=6.2}
+huron <- leer_serie(LakeHuron,
+  fuente = "R datasets: LakeHuron. Brockwell y Davis (1991), nivel anual del lago Huron en julio, 1875-1972",
+  unidad = "Nivel del lago (pies)")
+knitr::kable(describir_serie(huron, "LakeHuron"), digits = 2)
+graficar_serie(huron, "LakeHuron: nivel anual del lago")
+correlograma(huron, titulo = "LakeHuron: correlograma de la serie")
+```
+
+La ACF decae despacio y la PACF se corta después del primer rezago: el nivel se
+mueve lentamente pero no hay tendencia determinística sostenida. Ese es el
+patrón que la media móvil supone.
+
+```{r ej2-opt, fig.height=4}
+p2 <- particionar(huron)
+opt2 <- optimizar(p2$estimacion$y, "mm")
+graficar_optimizacion(opt2, "LakeHuron: MSE de un paso contra k")
+k2 <- opt2$optimo$k
+```
+
+La ventana no se fija a ojo: sale de la rejilla $k=2,\dots,12$ evaluando el MSE
+de un paso dentro del tramo de estimación. El óptimo es $k=$ `r k2`
+`r if (opt2$en_borde) "y cae en el borde de la rejilla, lo cual indica que la ventana preferida podría estar fuera del rango evaluado" else ""`.
+
+```{r ej2-ajuste, fig.height=6.2}
+ej2 <- protocolo_ejemplo(huron, "LakeHuron", function(y) ajustar_mm(y, k2),
+                         sprintf("media móvil (k = %d)", k2), p = 1, imprimir = FALSE)
+knitr::kable(dplyr::bind_rows(
+  dplyr::mutate(ej2$medidas_dentro,   tramo = "estimación"),
+  dplyr::mutate(ej2$medidas_fuera,    tramo = "validación"),
+  dplyr::mutate(ej2$medidas_referente,tramo = "ingenuo")), digits = 3)
+ej2$validacion$grafico_errores
+ej2$validacion$correlograma
+for (pr in ej2$validacion$pruebas) invisible(reportar_prueba(pr))
+ej2$grafico_final
+```
+
+**Conclusión.** Media móvil con $k=$ `r k2`, calentamiento de `r k2` períodos;
+MSE de validación `r round(ej2$medidas_fuera$MSE, 4)` y MASE
+`r round(ej2$medidas_fuera$MASE, 3)` contra `r round(ej2$medidas_referente$MASE, 3)`
+del ingenuo. 
+
+**Recomendación.** Sirve para una gestión hidrológica de corto plazo del nivel
+del lago (uno o dos años), donde el objetivo es seguir el nivel reciente más
+que proyectar una tendencia. El límite es justo lo que muestra Ljung–Box: el
+método no agota toda la dependencia temporal disponible, así que antes de
+usarlo de forma operativa vale la pena comparar contra el suavizamiento
+exponencial simple
+
+# Ejemplo 3. Suavizamiento exponencial simple sobre `Nile`
+
+```{r ej3-opt, fig.height=4}
+p3 <- particionar(nile)
+opt3 <- optimizar(p3$estimacion$y, "ses")
+graficar_optimizacion(opt3, "Nile: MSE de un paso contra alpha")
+a3 <- opt3$optimo$alpha
+```
+
+`r if (opt3$en_borde) "El óptimo cae en el borde de la rejilla. Un alpha en el borde superior equivale al pronóstico ingenuo y señalaría que la serie no es estacionaria en media." else sprintf("El óptimo alpha = %.2f cae en el interior de la rejilla: la serie tiene memoria, el nivel se actualiza de forma gradual.", a3)`
+
+```{r ej3, fig.height=6.2}
+ej3 <- protocolo_ejemplo(nile, "Nile", function(y) ajustar_ses(y, a3),
+                         sprintf("SES (alpha = %.2f)", a3), p = 1, imprimir = FALSE)
+knitr::kable(dplyr::bind_rows(
+  dplyr::mutate(ej3$medidas_dentro,   tramo = "estimación"),
+  dplyr::mutate(ej3$medidas_fuera,    tramo = "validación"),
+  dplyr::mutate(ej3$medidas_referente,tramo = "ingenuo")), digits = 3)
+# Verificación: corrección de error vs promedio ponderado (diferencia máxima)
+ej3$ajuste$parametros$dif_max_formas
+ej3$validacion$grafico_errores
+ej3$validacion$correlograma
+for (pr in ej3$validacion$pruebas) invisible(reportar_prueba(pr))
+ej3$grafico_final
+```
+
+**Conclusión.** El suavizamiento exponencial simple, con $\alpha=$ `r round(a3,2)`
+elegido por rejilla (óptimo en el interior, no en el borde), mejora sobre la
+media simple del Ejemplo 1 en las cuatro medidas: MSE de validación
+`r round(ej3$medidas_fuera$MSE,0)` frente a `r round(ej1$medidas_fuera$MSE,0)`,
+y MASE `r round(ej3$medidas_fuera$MASE,3)` frente a
+`r round(ej1$medidas_fuera$MASE,3)`. También supera al ingenuo
+(`r round(ej3$medidas_fuera$MASE,3)` contra `r round(ej3$medidas_referente$MASE,3)`).
+La forma de corrección de error coincide con el promedio ponderado con una
+diferencia máxima de `r formatC(ej3$ajuste$parametros$dif_max_formas, format="e", digits=2)`.
+De las cuatro pruebas de validación, ninguna rechaza $H_0$: sin sesgo
+($p=$ `r round(ej3$validacion$pruebas$t_media$valor_p,3)`), sin autocorrelación
+residual (Ljung–Box $p=$ `r round(ej3$validacion$pruebas$ljung_box$valor_p,3)`)
+y errores normales (Jarque–Bera $p=$ `r round(ej3$validacion$pruebas$jarque_bera$valor_p,3)`):
+es el método mejor comportado de los cuatro ejemplos de nivel.
+
+**Recomendación.** Es el método preferido para pronóstico operativo de corto
+plazo del caudal del Nilo, con validación limpia hasta el horizonte evaluado
+(`r ej3$h` años). El límite es estructural, no estadístico: al ser un método
+de nivel sin tendencia, si el caudal vuelve a sufrir un cambio de régimen (como
+ocurrió hacia 1899), el pronóstico solo se adapta gradualmente, a un ritmo que
+depende de $\alpha=$ `r round(a3,2)` — cuanto más bajo, más lento.
+
+# Ejemplo 4. Doble media móvil sobre `austres`
+
+```{r ej4-serie, fig.height=6.2}
+austres_d <- leer_serie(austres,
+  fuente = "R datasets: austres. Brockwell y Davis (1996), residentes en Australia, trimestral 1971:2-1993:3",
+  unidad = "Residentes (miles de personas)")
+knitr::kable(describir_serie(austres_d, "austres"), digits = 2)
+graficar_serie(austres_d, "austres: residentes en Australia")
+correlograma(austres_d, titulo = "austres: correlograma de la serie")
+```
+
+La ACF decae linealmente y muy despacio, la marca de una tendencia sostenida;
+no hay picos en los múltiplos de 4, es decir, no hay estacionalidad trimestral
+apreciable. Por eso el referente es el ingenuo simple y no el estacional.
+
+```{r ej4, fig.height=6.2}
+p4 <- particionar(austres_d)
+opt4 <- optimizar(p4$estimacion$y, "dmm")
+graficar_optimizacion(opt4, "austres: MSE de un paso contra k (doble media móvil)")
+k4 <- opt4$optimo$k
+ej4 <- protocolo_ejemplo(austres_d, "austres", function(y) ajustar_dmm(y, k4),
+                         sprintf("doble media móvil (k = %d)", k4), p = 2, imprimir = FALSE)
+knitr::kable(dplyr::bind_rows(
+  dplyr::mutate(ej4$medidas_dentro,   tramo = "estimación"),
+  dplyr::mutate(ej4$medidas_fuera,    tramo = "validación"),
+  dplyr::mutate(ej4$medidas_referente,tramo = "ingenuo")), digits = 3)
+ej4$validacion$grafico_errores
+ej4$validacion$correlograma
+for (pr in ej4$validacion$pruebas) invisible(reportar_prueba(pr))
+ej4$grafico_final
+```
+
+**Conclusión.** La doble media móvil, con $k=$ `r k4` (borde inferior de la
+rejilla 2 a 12), reduce el error de validación de forma sustancial frente al
+ingenuo: MASE `r round(ej4$medidas_fuera$MASE,3)` contra
+`r round(ej4$medidas_referente$MASE,3)`, una mejora de
+`r round((1 - ej4$medidas_fuera$MASE/ej4$medidas_referente$MASE)*100,1)`%.
+No hay sesgo en los errores
+($t=$ `r round(ej4$validacion$pruebas$t_media$estadistico,3)`,
+$p=$ `r round(ej4$validacion$pruebas$t_media$valor_p,3)`) y son normales
+(Jarque–Bera $p=$ `r round(ej4$validacion$pruebas$jarque_bera$valor_p,3)`), pero
+Ljung–Box rechaza con altísima confianza
+(Q = `r round(ej4$validacion$pruebas$ljung_box$estadistico,1)`,
+$p=$ `r formatC(ej4$validacion$pruebas$ljung_box$valor_p, format="e", digits=2)`):
+queda estructura temporal considerable sin capturar, señal de que el
+crecimiento de `austres` no es perfectamente lineal-local dentro de cada
+ventana de `r k4` trimestres.
+
+**Recomendación.** Útil para proyectar el número de residentes en Australia a
+un plazo corto (unos pocos trimestres), donde la ganancia frente al ingenuo es
+grande y clara. El límite es el fuerte rechazo de Ljung–Box: antes de usarlo
+para decisiones de política pública a mediano plazo conviene contrastarlo
+contra una tendencia global (Ejemplo 5) para verificar si la curvatura o los
+ciclos que el correlograma de errores sugiere son sistemáticos.
+# Ejemplo 5. Tendencia lineal sobre `austres`
+
+```{r ej5, fig.height=6.2}
+ej5 <- protocolo_ejemplo(austres_d, "austres", function(y) ajustar_tendencia(y, "lineal"),
+                         "tendencia lineal", p = 2, imprimir = FALSE)
+par5 <- ej5$ajuste$parametros
+knitr::kable(par5$tabla_coeficientes, digits = 5)
+c(R2 = par5$R2, sigma2 = par5$sigma2, DW = par5$durbin_watson,
+  rezagos_HAC = par5$rezagos_hac, gl = par5$gl)
+for (j in seq_len(nrow(par5$tabla_coeficientes))) {
+  tc <- par5$tabla_coeficientes[j, ]
+  invisible(reportar_prueba(t_coeficiente(tc$estimacion, tc$ee_hac, par5$gl, tc$coeficiente)))
+}
+```
+
+```{r ej5-verificacion}
+# Bloque de verificación permitido: coeficientes propios contra lm()
+tt <- seq_along(ej5$particion$estimacion$y)
+max(abs(coef(lm(ej5$particion$estimacion$y ~ tt)) - par5$coeficientes))
+```
+
+```{r ej5-supuestos, fig.height=6.2}
+ej5$validacion$grafico_errores
+ej5$validacion$correlograma
+for (pr in ej5$validacion$pruebas) invisible(reportar_prueba(pr))
+library(ggplot2)
+ggplot(tibble::tibble(ajustado = ej5$ajuste$yhat, residuo = ej5$errores),
+       aes(ajustado, residuo)) + geom_hline(yintercept = 0, colour = "grey40") +
+  geom_point(size = 1) + labs(title = "Residuos contra valores ajustados",
+  x = "Valor ajustado", y = "Residuo") + theme_bw()
+ej5$grafico_final
+```
+
+Los residuos de una tendencia determinística sobre una serie con tendencia
+estocástica están fuertemente autocorrelacionados; con
+$d=`r round(par5$durbin_watson, 4)`$, muy por debajo de 2, la autocorrelación
+es positiva. En ese caso los errores estándar ordinarios subestiman la
+variabilidad de $\hat\beta$ y los valores $p$ ordinarios no son interpretables:
+la decisión sobre $H_0:\beta_j=0$ se toma con el error estándar robusto HAC de
+Bartlett con `r par5$rezagos_hac` rezagos, que es el reportado arriba.
+
+**Conclusión.**  La tendencia lineal ajustada por MCO tiene $R^2=$
+`r round(par5$R2,4)`, un ajuste dentro de muestra casi perfecto, pero fuera de
+muestra el MASE es `r round(ej5$medidas_fuera$MASE,3)`, peor que la doble media
+móvil del Ejemplo 4 (`r round(ej4$medidas_fuera$MASE,3)`) aunque todavía mejor
+que el ingenuo (`r round(ej5$medidas_referente$MASE,3)`). Ambos coeficientes
+son significativos con el error estándar robusto HAC
+($t=$ `r round(par5$tabla_coeficientes$t_hac[1],1)` y
+`r round(par5$tabla_coeficientes$t_hac[2],1)`), pero esa significancia solo
+confirma que existe tendencia, no que el modelo pronostique bien. Los residuos
+están masivamente autocorrelacionados: $DW=$ `r round(par5$durbin_watson,4)`,
+casi cero, y Ljung–Box rechaza con
+$p=$ `r formatC(ej5$validacion$pruebas$ljung_box$valor_p, format="e", digits=2)`:
+la tendencia global no sigue las fluctuaciones locales de la serie.
+
+**Recomendación.** Sirve para caracterizar la tasa de crecimiento promedio de
+largo plazo (`r round(par5$tabla_coeficientes$estimacion[2],1)` miles de
+personas por trimestre), útil para planeación demográfica a muy largo plazo,
+pero no para pronóstico operativo de corto o mediano plazo, donde la doble
+media móvil del Ejemplo 4 es claramente superior. El límite declarado es la
+autocorrelación residual extrema ($DW\approx0$): el supuesto de tendencia
+determinística constante no se sostiene en el periodo evaluado.
+
+# Ejemplo 6. Tendencia cuadrática sobre `airmiles`
+
+```{r ej6, fig.height=6.2}
+airm <- leer_serie(airmiles,
+  fuente = "R datasets: airmiles. Brown (1963), millas-pasajero de aerolíneas comerciales de EE. UU., 1937-1960",
+  unidad = "Millas-pasajero (miles)")
+knitr::kable(describir_serie(airm, "airmiles"), digits = 2)
+graficar_serie(airm, "airmiles: millas-pasajero")
+correlograma(airm, titulo = "airmiles: correlograma de la serie")
+ej6 <- protocolo_ejemplo(airm, "airmiles", function(y) ajustar_tendencia(y, "cuadratica"),
+                         "tendencia cuadrática", p = 3, imprimir = FALSE)
+par6 <- ej6$ajuste$parametros
+knitr::kable(par6$tabla_coeficientes, digits = 5)
+for (j in seq_len(nrow(par6$tabla_coeficientes))) {
+  tc <- par6$tabla_coeficientes[j, ]
+  invisible(reportar_prueba(t_coeficiente(tc$estimacion, tc$ee_hac, par6$gl, tc$coeficiente)))
+}
+knitr::kable(dplyr::bind_rows(
+  dplyr::mutate(ej6$medidas_dentro, tramo = "estimación"),
+  dplyr::mutate(ej6$medidas_fuera,  tramo = "validación"),
+  dplyr::mutate(ej6$medidas_referente, tramo = "ingenuo")), digits = 3)
+ej6$validacion$grafico_errores
+ej6$validacion$correlograma
+for (pr in ej6$validacion$pruebas) invisible(reportar_prueba(pr))
+ej6$grafico_final
+```
+
+Con `r ej6$validacion$n` errores, la prueba de Jarque–Bera es asintótica y su
+decisión se reporta con esa advertencia.
+
+**Conclusión.** **Conclusión.** La tendencia cuadrática, sobre apenas `r ej6$particion$n_estimacion`
+años de estimación, alcanza un MASE de validación de
+`r round(ej6$medidas_fuera$MASE,3)`, casi cuatro veces mejor que el ingenuo
+(`r round(ej6$medidas_referente$MASE,3)`). Los tres coeficientes son
+significativos con error estándar HAC
+(t = `r round(par6$tabla_coeficientes$t_hac[1],2)`,
+`r round(par6$tabla_coeficientes$t_hac[2],2)` y
+`r round(par6$tabla_coeficientes$t_hac[3],2)`), y el coeficiente cuadrático
+positivo y significativo confirma un crecimiento acelerado. Ljung–Box rechaza
+($p=$ `r round(ej6$validacion$pruebas$ljung_box$valor_p,4)`), pero con solo
+`r ej6$validacion$n` errores y `r ej6$validacion$m` rezagos cualquier
+estructura residual pesa mucho en la prueba; además, con
+`r ej6$validacion$n` errores Jarque–Bera está en el límite de su aproximación
+asintótica, así que su no rechazo
+($p=$ `r round(ej6$validacion$pruebas$jarque_bera$valor_p,3)`) se lee con esa
+reserva.
+
+**Recomendación.** Útil para anticipar el crecimiento de millas-pasajero de
+aerolíneas en el corto plazo (los `r ej6$h` años de horizonte evaluados), dado
+el bajo MASE frente al ingenuo. El límite declarado es el tamaño de muestra: con
+apenas `r ej6$particion$n_estimacion` observaciones las pruebas de validación
+tienen poco poder, y una tendencia cuadrática extrapolada diverge rápido —
+cualquier pronóstico más allá de unos pocos años debe tomarse con mucha
+cautela.
+
+# Ejemplo 7. Tendencia exponencial sobre `JohnsonJohnson`
+
+```{r ej7, fig.height=6.2}
+jj <- leer_serie(JohnsonJohnson,
+  fuente = "R datasets: JohnsonJohnson. Shumway y Stoffer (2000), utilidades trimestrales por acción, 1960-1980",
+  unidad = "Utilidad por acción (dólares)")
+knitr::kable(describir_serie(jj, "JohnsonJohnson"), digits = 3)
+graficar_serie(jj, "JohnsonJohnson: utilidades trimestrales por acción")
+correlograma(jj, titulo = "JohnsonJohnson: correlograma de la serie")
+ej7 <- protocolo_ejemplo(jj, "JohnsonJohnson",
+  function(y) ajustar_tendencia(y, "exponencial", corregir_sesgo = TRUE),
+  "tendencia exponencial", p = 2, estacional = TRUE, imprimir = FALSE)
+par7 <- ej7$ajuste$parametros
+knitr::kable(par7$tabla_coeficientes, digits = 5)
+c(b0 = par7$b0_exponencial, b1 = par7$b1_exponencial,
+  factor_sesgo = par7$factor_sesgo, R2_log = par7$R2, DW = par7$durbin_watson)
+for (j in seq_len(nrow(par7$tabla_coeficientes))) {
+  tc <- par7$tabla_coeficientes[j, ]
+  invisible(reportar_prueba(t_coeficiente(tc$estimacion, tc$ee_hac, par7$gl, tc$coeficiente)))
+}
+knitr::kable(dplyr::bind_rows(
+  dplyr::mutate(ej7$medidas_dentro, tramo = "estimación"),
+  dplyr::mutate(ej7$medidas_fuera,  tramo = "validación"),
+  dplyr::mutate(ej7$medidas_referente, tramo = "ingenuo estacional")), digits = 3)
+ej7$validacion$grafico_errores
+ej7$validacion$correlograma
+for (pr in ej7$validacion$pruebas) invisible(reportar_prueba(pr))
+ej7$grafico_final
+```
+
+El pronóstico $e^{\hat a+\hat\theta t}$ estima la **mediana** condicional de
+$Y_t$, no la media, porque la esperanza de una lognormal incluye el término
+$e^{\sigma^2/2}$. Por eso se usó `corregir_sesgo = TRUE`, que multiplica por
+$e^{\hat\sigma^2_{\ln}/2}=`r round(par7$factor_sesgo, 5)`$. El límite del método
+sobre esta serie es la estacionalidad trimestral, que la tendencia no modela y
+que reaparece como picos en los múltiplos de 4 del correlograma de errores.
+
+**Conclusión.**  La tendencia exponencial (MCO sobre logaritmos, con corrección
+de sesgo $=$ `r round(par7$factor_sesgo,4)`) da una tasa de crecimiento
+$\hat b_1=$ `r round(par7$b1_exponencial,4)` (unos
+`r round((par7$b1_exponencial-1)*100,2)`% trimestral), y sobre el tramo de
+validación logra MASE = `r round(ej7$medidas_fuera$MASE,3)`, mejor que el
+ingenuo estacional (`r round(ej7$medidas_referente$MASE,3)`). Pero es la
+validación de errores más problemática de los ocho ejemplos: Ljung–Box rechaza
+con $p=$ `r formatC(ej7$validacion$pruebas$ljung_box$valor_p, format="e", digits=2)`
+y Jarque–Bera también, con $p=$
+`r formatC(ej7$validacion$pruebas$jarque_bera$valor_p, format="e", digits=2)`:
+los errores no son normales ni independientes. Es exactamente el límite
+esperado — la tendencia exponencial no modela la estacionalidad trimestral de
+las utilidades de Johnson & Johnson, que reaparece como estructura en el
+correlograma de errores.
+
+**Recomendación.** Sirve para caracterizar la tasa de crecimiento estructural
+de largo plazo de la utilidad por acción, pero no para pronóstico operativo
+trimestre a trimestre, donde la estacionalidad no capturada genera errores que
+se repiten cada 4 trimestres. El límite declarado es que la normalidad y la
+independencia de los errores se rechazan con altísima confianza, así que
+ningún intervalo de pronóstico basado en este ajuste sería confiable sin antes
+remover la estacionalidad.
+# Ejemplo 8. Holt lineal sobre `WWWusage`
+
+```{r ej8, fig.height=6.2}
+www <- leer_serie(WWWusage,
+  fuente = "R datasets: WWWusage. Durbin y Koopman (2001), usuarios conectados a un servidor de internet, un dato por minuto",
+  unidad = "Usuarios conectados")
+knitr::kable(describir_serie(www, "WWWusage"), digits = 2)
+graficar_serie(www, "WWWusage: usuarios conectados")
+correlograma(www, titulo = "WWWusage: correlograma de la serie")
+p8 <- particionar(www)
+opt8 <- optimizar(p8$estimacion$y, "holt")
+graficar_optimizacion(opt8, "WWWusage: mapa de MSE sobre la rejilla (alpha, beta)")
+a8 <- opt8$optimo$alpha; b8 <- opt8$optimo$beta
+ej8 <- protocolo_ejemplo(www, "WWWusage", function(y) ajustar_holt(y, a8, b8),
+  sprintf("Holt lineal (alpha = %.2f, beta = %.2f)", a8, b8), p = 2, imprimir = FALSE)
+# Verificación de la forma de corrección de error (debe ser ~0)
+ej8$ajuste$parametros$dif_max_correccion_error
+knitr::kable(dplyr::bind_rows(
+  dplyr::mutate(ej8$medidas_dentro, tramo = "estimación"),
+  dplyr::mutate(ej8$medidas_fuera,  tramo = "validación"),
+  dplyr::mutate(ej8$medidas_referente, tramo = "ingenuo")), digits = 3)
+ej8$validacion$grafico_errores
+ej8$validacion$correlograma
+for (pr in ej8$validacion$pruebas) invisible(reportar_prueba(pr))
+ej8$grafico_final
+```
+
+El óptimo de la rejilla es $\alpha=`r a8`$ y $\beta=`r b8`$.
+`r if (opt8$en_borde) "Cae en el borde de la rejilla: un alpha alto equivale a seguir casi por completo la última observación, señal de que el nivel no es estable." else "Cae en el interior de la rejilla."`
+
+**Conclusión.** **Conclusión.** Holt lineal con $\alpha=\beta=$ `r a8` (ambos en el borde
+superior de la rejilla) logra MASE de validación
+`r round(ej8$medidas_fuera$MASE,3)`, más de cuatro veces mejor que el ingenuo
+(`r round(ej8$medidas_referente$MASE,3)`). Que el óptimo caiga en el borde
+superior es la lectura clave: el método prefiere seguir casi por completo el
+último dato y la última pendiente observada, señal de que tanto el nivel como
+la pendiente de usuarios conectados cambian muy rápido, casi tan rápido como la
+propia serie. Aun así, Ljung–Box todavía rechaza
+(Q = `r round(ej8$validacion$pruebas$ljung_box$estadistico,1)`,
+$p=$ `r formatC(ej8$validacion$pruebas$ljung_box$valor_p, format="g", digits=3)`):
+queda estructura residual sin explotar, aunque no hay sesgo
+($p=$ `r round(ej8$validacion$pruebas$t_media$valor_p,3)`) ni falta de
+normalidad (Jarque–Bera $p=$ `r round(ej8$validacion$pruebas$jarque_bera$valor_p,3)`).
+
+**Recomendación.** Apropiado para pronóstico de muy corto plazo de tráfico de
+un servidor (minuto a minuto), dado que $\alpha$ y $\beta$ altos privilegian
+reaccionar rápido a cambios. El límite declarado es justo el óptimo en el
+borde: el nivel y la pendiente no son estables, así que el pronóstico pierde
+confiabilidad rápidamente más allá de 2 o 3 pasos; conviene además ampliar la
+rejilla de búsqueda hasta 0.99 para confirmar que `r a8` sigue siendo el
+óptimo y no un artefacto del límite superior evaluado.
+
+# Contraejemplo (literal 4e). Media simple sobre `AirPassengers`
+
+```{r ejc, fig.height=6.2}
+aire <- leer_serie(AirPassengers,
+  fuente = "R datasets: AirPassengers. Box, Jenkins y Reinsel (1976), pasajeros mensuales internacionales, 1949-1960",
+  unidad = "Pasajeros (miles)")
+graficar_serie(aire, "AirPassengers: pasajeros mensuales")
+correlograma(aire, titulo = "AirPassengers: correlograma de la serie")
+ejc <- protocolo_ejemplo(aire, "AirPassengers", ajustar_media,
+  "media simple (contraejemplo)", p = 1, estacional = TRUE, imprimir = FALSE)
+knitr::kable(dplyr::bind_rows(
+  dplyr::mutate(ejc$medidas_dentro, tramo = "estimación"),
+  dplyr::mutate(ejc$medidas_fuera,  tramo = "validación"),
+  dplyr::mutate(ejc$medidas_referente, tramo = "ingenuo estacional")), digits = 3)
+ejc$validacion$grafico_errores
+ejc$validacion$correlograma
+invisible(reportar_prueba(ejc$validacion$pruebas$ljung_box,
+  lectura = "Los errores de un paso conservan toda la tendencia y toda la estacionalidad de la serie: el método no extrajo la señal."))
+ejc$grafico_final
+```
+
+Aquí el supuesto de nivel constante se viola por completo: la serie tiene
+tendencia creciente y estacionalidad multiplicativa. Se nota en tres cifras. El
+MASE de validación es `r round(ejc$medidas_fuera$MASE, 2)` frente a
+`r round(ejc$medidas_referente$MASE, 2)` del ingenuo estacional; el estadístico
+de Ljung–Box sobre los errores vale
+`r round(ejc$validacion$pruebas$ljung_box$estadistico, 1)` con valor crítico
+`r round(ejc$validacion$pruebas$ljung_box$critico, 2)`; y el correlograma de los
+errores muestra autocorrelaciones positivas que decaen muy lentamente, el patrón
+de una tendencia no removida. La media simple promedia toda la historia, de modo
+que el pronóstico se queda anclado muy por debajo del nivel reciente.
+
+# Resumen de resultados
+
+```{r resumen}
+fila <- function(ej, par) tibble::tibble(
+  metodo = ej$etiqueta, serie = ej$nombre, parametros = par, h = ej$h,
+  MASE_metodo = ej$medidas_fuera$MASE, MASE_referente = ej$medidas_referente$MASE)
+knitr::kable(dplyr::bind_rows(
+  fila(ej1, "ninguno"), fila(ej2, sprintf("k = %d", k2)),
+  fila(ej3, sprintf("alpha = %.2f", a3)), fila(ej4, sprintf("k = %d", k4)),
+  fila(ej5, "MCO, 2 coef."), fila(ej6, "MCO, 3 coef."),
+  fila(ej7, "MCO en logaritmos"), fila(ej8, sprintf("alpha = %.2f, beta = %.2f", a8, b8)),
+  fila(ejc, "contraejemplo")), digits = 3)
+```
+
+```{r sesion}
+sessionInfo()
+```
