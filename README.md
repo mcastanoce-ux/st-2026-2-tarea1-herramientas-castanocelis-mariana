@@ -1,10 +1,10 @@
-https://github.com/USUARIO/st-2026-2-tarea1-herramientas-apellidos-nombres
+https://github.com/mcastanoce-ux/st-2026-2-tarea1-herramientas-castanocelis-mariana
 
 # Tarea 1: caja de herramientas de pronóstico
 
-Series de tiempo univariadas (3009297), semestre 2026-II. Universidad Nacional
+Series de tiempo univariadas , semestre 2026-II. Universidad Nacional
 de Colombia, sede Medellín. Prof. Juan Pablo Valencia Arango.
-Autor: APELLIDOS, Nombres.
+Autor: Mariana Castaño Celis.
 
 ## 1. Qué contiene el repositorio
 
@@ -40,9 +40,7 @@ Para el informe:
 quarto render informe/informe.qmd
 ```
 
-Tiempo de ejecución observado: 10.6 segundos (R 4.3.3, Ubuntu 24.04, medido con
-`system.time(source("ejemplos/ejemplos.R"))`). Vuelva a medirlo en su máquina y
-reemplace esta cifra.
+
 
 ## 3. Cómo se usan las funciones
 
@@ -105,8 +103,7 @@ las series estacionales (`JohnsonJohnson` y `AirPassengers`).
 | 8 | WWWusage | Holt lineal | alpha = 0.95, beta = 0.95 | 12 | 1.890 | 7.625 |
 | e | AirPassengers | Media simple (contraejemplo) | ninguno | 12 | 7.017 | 1.571 |
 
-Dos filas merecen comentario explícito, como exige el literal 4(c). En el
-ejemplo 1 la media simple **no supera** al ingenuo (0.843 contra 0.835): el
+ En el ejemplo 1 la media simple **no supera** al ingenuo (0.843 contra 0.835): el
 nivel del Nilo cambió tras 1899 y promediar toda la historia arrastra un nivel
 antiguo. En el ejemplo 8 el óptimo de Holt cae en el borde de la rejilla
 (alpha = beta = 0.95), lo que indica que el nivel y la pendiente de `WWWusage`
@@ -115,8 +112,6 @@ dato.
 
 ## 6. Declaración de uso de IA
 
-COMPLETAR con la verdad de su proceso. Debe decir tres cosas: qué se pidió, qué
-se recibió y qué se verificó por cuenta propia. Un ejemplo de la forma esperada:
 
 - **Qué se pidió**: ayuda para estructurar el repositorio y para escribir una
   primera versión de las funciones `[...]`, así como la redacción de los
