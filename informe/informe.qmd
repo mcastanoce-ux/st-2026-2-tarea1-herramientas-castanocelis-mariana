@@ -26,6 +26,31 @@ knitr::opts_chunk$set(echo = TRUE, fig.width = 8, fig.height = 4.6, dpi = 150)
 for (a in c("R/00-lectura.R", "R/01-graficos.R", "R/02-metodos.R", "R/03-evaluacion.R")) source(a)
 ```
 
+# Convenciones que fijan los números
+1. **ACF muestral con divisor único $T$** (Definición 2.5 de las notas):
+$$r_h=\frac{\sum_{t=h+1}^{T}(Y_t-\bar Y)(Y_{t-h}-\bar Y)}{\sum_{t=1}^{T}(Y_t-\bar Y)^2}.$$
+El mismo $T$ divide numerador y denominador, de modo que $r_h$ coincide con
+`stats::acf()`; la verificación numérica aparece en el pie de cada correlograma.
+
+2. **Banda del correlograma**: no es un estadístico de prueba sino el intervalo
+asintótico de $r_h$ bajo ruido blanco. Por el resultado de Bartlett, si la
+sucesión es i.i.d. con varianza finita, $r_h\stackrel{a}{\sim}N(0,1/n)$, y la
+banda es $\pm z_{1-\alpha/2}/\sqrt n\approx\pm 1.96/\sqrt n$, exactamente la
+línea `clim0 <- qnorm((1 + ci)/2)/sqrt(x$n.used)` de `plot.acf`. Cuando se
+grafica el correlograma de los errores, $n$ es **el número de errores**, no el
+número de observaciones de la serie.
+
+3. **Inicializaciones**: $\hat Y_2=Y_1$ en la media simple y en el suavizamiento
+exponencial simple; $k$ períodos de calentamiento en la media móvil y $2k-1$ en
+la doble media móvil; $L_1=Y_1$ y $\hat T_1=0$ en Holt; las tendencias no tienen
+calentamiento porque son un ajuste por mínimos cuadrados sobre toda la muestra.
+
+4. **Partición**: el tramo de validación son las últimas $h$ observaciones con
+$h=\min\{12,\lfloor 0.2T\rfloor\}$ y, en series estacionales, al menos un ciclo.
+
+5. **MASE**: el escalador es el MAE de los pronósticos de un paso del ingenuo
+(o del ingenuo estacional) **dentro del tramo de estimación**. Un MASE menor que
+1 significa que el método supera a ese referente. 
 
 # Ejemplo 1. Media simple sobre `Nile`
 
