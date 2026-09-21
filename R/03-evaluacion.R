@@ -151,17 +151,67 @@ t_coeficiente <- function(estimacion, ee, gl, nombre = "beta_j") {
   )
 }
 
+# Lectura automatica de una prueba segun su nombre y la decision tomada.
+# 'contexto' nombra la sucesion analizada (p. ej. "los errores de un paso del
+# metodo (media simple) sobre Nile") para que la lectura sea propia de cada serie.
+.lectura_automatica <- function(prueba, rechaza, contexto = NULL) {
+  nombre <- prueba$prueba
+  sobre <- if (is.null(contexto)) "la sucesion analizada" else contexto
+  if (identical(nombre, "Ljung-Box")) {
+    if (isTRUE(rechaza))
+      sprintf("Se rechaza H0: hay autocorrelacion (estructura temporal) en %s.", sobre)
+    else
+      sprintf("No se rechaza H0: no hay evidencia de autocorrelacion en %s.", sobre)
+  } else if (identical(nombre, "Jarque-Bera")) {
+    if (isTRUE(rechaza))
+      sprintf("Se rechaza H0: la distribucion de %s se aleja de la normal.", sobre)
+    else
+      sprintf("No se rechaza H0: la distribucion de %s es compatible con la normal.", sobre)
+  } else if (identical(nombre, "Durbin-Watson")) {
+    cierre <- "la decision formal se toma con las cotas dL y dU de la tabla."
+    if (prueba$estadistico < 1.5) {
+      sprintf("d = %.3f, por debajo de 2: sugiere autocorrelacion positiva de primer orden en %s; %s",
+              prueba$estadistico, sobre, cierre)
+    } else if (prueba$estadistico > 2.5) {
+      sprintf("d = %.3f, por encima de 2: sugiere autocorrelacion negativa de primer orden en %s; %s",
+              prueba$estadistico, sobre, cierre)
+    } else {
+      sprintf("d = %.3f, cercano a 2: no sugiere autocorrelacion relevante de primer orden en %s; %s",
+              prueba$estadistico, sobre, cierre)
+    }
+  } else if (identical(nombre, "t de media cero")) {
+    if (isTRUE(rechaza)) {
+      sentido <- if (!is.null(prueba$media) && prueba$media > 0)
+        "el metodo tiende a subestimar (error medio positivo)"
+      else "el metodo tiende a sobrestimar (error medio negativo)"
+      sprintf("Se rechaza H0: hay evidencia de sesgo sistematico en %s; %s.", sobre, sentido)
+    } else
+      sprintf("No se rechaza H0: no hay evidencia de sesgo sistematico en %s.", sobre)
+  } else if (grepl("^t sobre", nombre)) {
+    coef_nombre <- sub("^t sobre (.*) \\(EE robusto HAC\\)$", "\\1", nombre)
+    if (isTRUE(rechaza))
+      sprintf("Se rechaza H0: el coeficiente %s es significativamente distinto de cero (con error estandar robusto HAC).", coef_nombre)
+    else
+      sprintf("No se rechaza H0: no hay evidencia de que el coeficiente %s sea distinto de cero.", coef_nombre)
+  } else {
+    if (isTRUE(rechaza)) "Se rechaza H0 al nivel de significancia evaluado."
+    else "No se rechaza H0 al nivel de significancia evaluado."
+  }
+}
+
 #Interpretacion de las hipotesis
-reportar_prueba <- function(prueba, lectura = NULL, alfa = 0.05) {
+reportar_prueba <- function(prueba, lectura = NULL, alfa = 0.05, contexto = NULL) {
   stopifnot("prueba debe ser una lista devuelta por una funcion de prueba" =
               is.list(prueba) && !is.null(prueba$estadistico))
+  rechaza <- !is.na(prueba$valor_p) && prueba$valor_p < alfa
   decision <- if (is.na(prueba$valor_p)) {
     "la decision se toma con las cotas dL y dU de la tabla (ver informe)"
-  } else if (prueba$valor_p < alfa) {
+  } else if (rechaza) {
     sprintf("se rechaza H0 al %g %%", 100 * alfa)
   } else {
     sprintf("no se rechaza H0 al %g %%", 100 * alfa)
   }
+  if (is.null(lectura)) lectura <- .lectura_automatica(prueba, rechaza, contexto)
   cat("\n--- ", prueba$prueba, " ---\n", sep = "")
   cat("1. H0: ", prueba$H0, "\n   H1: ", prueba$H1, "\n", sep = "")
   cat("2. Estadistico: ", prueba$formula,
@@ -173,12 +223,13 @@ reportar_prueba <- function(prueba, lectura = NULL, alfa = 0.05) {
               if (is.na(prueba$valor_p)) "no disponible (ver cotas)" else
                 formatC(prueba$valor_p, format = "g", digits = 4)))
   cat("5. Decision: ", decision, "\n", sep = "")
-  cat("6. Lectura: ", if (is.null(lectura)) "(se escribe en el informe)" else lectura, "\n", sep = "")
+  cat("6. Lectura: ", lectura, "\n", sep = "")
   if (!is.null(prueba$advertencia) && !is.na(prueba$advertencia)) {
     cat("   Advertencia: ", prueba$advertencia, "\n", sep = "")
   }
   
-  
+  # Se copia a una variable con otro nombre: tibble() evalua las columnas de
+  # forma secuencial y la columna 'prueba' ocultaria al argumento 'prueba'.
   x <- prueba
   invisible(tibble::tibble(
     prueba = x$prueba,
@@ -186,8 +237,29 @@ reportar_prueba <- function(prueba, lectura = NULL, alfa = 0.05) {
     gl = paste(x$gl, collapse = ", "),
     critico = x$critico,
     valor_p = x$valor_p,
-    decision = decision
+    decision = decision,
+    lectura = lectura
   ))
+}
+
+#' Reporta, para un ejemplo de protocolo_ejemplo(), las pruebas de la serie
+#' (Ljung-Box) y las cuatro pruebas de los errores de un paso, cada una con su
+#' lectura propia. 'lecturas' es una lista con nombre (t_media, ljung_box,
+#' jarque_bera, durbin_watson) para sustituir la lectura automatica de alguna.
+reportar_validacion <- function(ej, lecturas = NULL, alfa = 0.05, incluir_serie = TRUE) {
+  stopifnot("ej debe venir de protocolo_ejemplo()" =
+              is.list(ej) && !is.null(ej$validacion$pruebas))
+  if (incluir_serie) {
+    cat(sprintf("\n=== Prueba sobre la serie %s ===", ej$nombre))
+    reportar_prueba(ej$ljung_box_serie, alfa = alfa,
+                    contexto = sprintf("la serie %s", ej$nombre))
+  }
+  cat(sprintf("\n=== Pruebas sobre los errores de un paso: %s con %s ===", ej$nombre, ej$etiqueta))
+  contexto <- sprintf("los errores de un paso de %s con %s", ej$nombre, ej$etiqueta)
+  res <- lapply(names(ej$validacion$pruebas), function(k)
+    reportar_prueba(ej$validacion$pruebas[[k]], lectura = lecturas[[k]],
+                    alfa = alfa, contexto = contexto))
+  invisible(dplyr::bind_rows(res))
 }
 
 #' Validacion completa de los errores de un paso de un metodo.

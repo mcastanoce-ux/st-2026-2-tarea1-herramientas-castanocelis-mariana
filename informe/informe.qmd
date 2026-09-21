@@ -24,6 +24,11 @@ knitr::opts_chunk$set(echo = TRUE, fig.width = 8, fig.height = 4.6, dpi = 150)
 ```{r cargar}
 # Se cargan las funciones propias. 
 for (a in c("R/00-lectura.R", "R/01-graficos.R", "R/02-metodos.R", "R/03-evaluacion.R")) source(a)
+if (!exists("reportar_validacion")) stop(
+  "El R/03-evaluacion.R cargado no define reportar_validacion(). ",
+  "Directorio de trabajo: ", getwd(), ". ",
+  "Archivo leido: ", normalizePath("R/03-evaluacion.R", mustWork = FALSE), ". ",
+  "Ultima modificacion: ", format(file.mtime("R/03-evaluacion.R")))
 ```
 
 # Convenciones que fijan los números
@@ -93,14 +98,7 @@ ej1$validacion$correlograma
 ```
 
 ```{r ej1-pruebas-errores}
-invisible(reportar_prueba(ej1$validacion$pruebas$t_media,
-  lectura = "Se examina si la media simple está sesgada sobre este tramo."))
-invisible(reportar_prueba(ej1$validacion$pruebas$ljung_box,
-  lectura = "Se examina si queda estructura temporal sin explotar en los errores de un paso."))
-invisible(reportar_prueba(ej1$validacion$pruebas$jarque_bera,
-  lectura = "Se examina la normalidad de los errores, necesaria si se quieren intervalos de pronóstico."))
-invisible(reportar_prueba(ej1$validacion$pruebas$durbin_watson,
-  lectura = "Con d por debajo de 2 hay autocorrelación positiva de primer orden; la decisión formal usa las cotas dL y dU para T y k."))
+reportar_validacion(ej1, incluir_serie = FALSE)
 ```
 
 ```{r ej1-final}
@@ -125,7 +123,7 @@ knitr::kable(ej1$validacion$resumen, digits = 4)
 **Recomendación.** Sirve como referencia comparativa de bajo costo, no como
 pronóstico operativo: el método está significativamente sesgado
 (t = `r round(ej1$validacion$pruebas$t_media$estadistico,2)`,
-$p<0.001$),, ni siquiera supera al ingenuo sobre este
+$p<0.001$), y ni siquiera supera al ingenuo sobre este
 tramo (MASE `r round(ej1$medidas_fuera$MASE,3)` contra
 `r round(ej1$medidas_referente$MASE,3)`)
 
@@ -164,7 +162,7 @@ knitr::kable(dplyr::bind_rows(
   dplyr::mutate(ej2$medidas_referente,tramo = "ingenuo")), digits = 3)
 ej2$validacion$grafico_errores
 ej2$validacion$correlograma
-for (pr in ej2$validacion$pruebas) invisible(reportar_prueba(pr))
+reportar_validacion(ej2)
 ej2$grafico_final
 ```
 
@@ -202,7 +200,7 @@ knitr::kable(dplyr::bind_rows(
 ej3$ajuste$parametros$dif_max_formas
 ej3$validacion$grafico_errores
 ej3$validacion$correlograma
-for (pr in ej3$validacion$pruebas) invisible(reportar_prueba(pr))
+reportar_validacion(ej3)
 ej3$grafico_final
 ```
 
@@ -256,7 +254,7 @@ knitr::kable(dplyr::bind_rows(
   dplyr::mutate(ej4$medidas_referente,tramo = "ingenuo")), digits = 3)
 ej4$validacion$grafico_errores
 ej4$validacion$correlograma
-for (pr in ej4$validacion$pruebas) invisible(reportar_prueba(pr))
+reportar_validacion(ej4)
 ej4$grafico_final
 ```
 
@@ -282,6 +280,7 @@ grande y clara. El límite es el fuerte rechazo de Ljung–Box: antes de usarlo
 para decisiones de política pública a mediano plazo conviene contrastarlo
 contra una tendencia global (Ejemplo 5) para verificar si la curvatura o los
 ciclos que el correlograma de errores sugiere son sistemáticos.
+
 # Ejemplo 5. Tendencia lineal sobre `austres`
 
 ```{r ej5, fig.height=6.2}
@@ -306,7 +305,7 @@ max(abs(coef(lm(ej5$particion$estimacion$y ~ tt)) - par5$coeficientes))
 ```{r ej5-supuestos, fig.height=6.2}
 ej5$validacion$grafico_errores
 ej5$validacion$correlograma
-for (pr in ej5$validacion$pruebas) invisible(reportar_prueba(pr))
+reportar_validacion(ej5)
 library(ggplot2)
 ggplot(tibble::tibble(ajustado = ej5$ajuste$yhat, residuo = ej5$errores),
        aes(ajustado, residuo)) + geom_hline(yintercept = 0, colour = "grey40") +
@@ -368,14 +367,14 @@ knitr::kable(dplyr::bind_rows(
   dplyr::mutate(ej6$medidas_referente, tramo = "ingenuo")), digits = 3)
 ej6$validacion$grafico_errores
 ej6$validacion$correlograma
-for (pr in ej6$validacion$pruebas) invisible(reportar_prueba(pr))
+reportar_validacion(ej6)
 ej6$grafico_final
 ```
 
 Con `r ej6$validacion$n` errores, la prueba de Jarque–Bera es asintótica y su
 decisión se reporta con esa advertencia.
 
-**Conclusión.** **Conclusión.** La tendencia cuadrática, sobre apenas `r ej6$particion$n_estimacion`
+**Conclusión.** La tendencia cuadrática, sobre apenas `r ej6$particion$n_estimacion`
 años de estimación, alcanza un MASE de validación de
 `r round(ej6$medidas_fuera$MASE,3)`, casi cuatro veces mejor que el ingenuo
 (`r round(ej6$medidas_referente$MASE,3)`). Los tres coeficientes son
@@ -426,7 +425,7 @@ knitr::kable(dplyr::bind_rows(
   dplyr::mutate(ej7$medidas_referente, tramo = "ingenuo estacional")), digits = 3)
 ej7$validacion$grafico_errores
 ej7$validacion$correlograma
-for (pr in ej7$validacion$pruebas) invisible(reportar_prueba(pr))
+reportar_validacion(ej7)
 ej7$grafico_final
 ```
 
@@ -459,6 +458,7 @@ se repiten cada 4 trimestres. El límite declarado es que la normalidad y la
 independencia de los errores se rechazan con altísima confianza, así que
 ningún intervalo de pronóstico basado en este ajuste sería confiable sin antes
 remover la estacionalidad.
+
 # Ejemplo 8. Holt lineal sobre `WWWusage`
 
 ```{r ej8, fig.height=6.2}
@@ -482,14 +482,14 @@ knitr::kable(dplyr::bind_rows(
   dplyr::mutate(ej8$medidas_referente, tramo = "ingenuo")), digits = 3)
 ej8$validacion$grafico_errores
 ej8$validacion$correlograma
-for (pr in ej8$validacion$pruebas) invisible(reportar_prueba(pr))
+reportar_validacion(ej8)
 ej8$grafico_final
 ```
 
 El óptimo de la rejilla es $\alpha=`r a8`$ y $\beta=`r b8`$.
 `r if (opt8$en_borde) "Cae en el borde de la rejilla: un alpha alto equivale a seguir casi por completo la última observación, señal de que el nivel no es estable." else "Cae en el interior de la rejilla."`
 
-**Conclusión.** **Conclusión.** Holt lineal con $\alpha=\beta=$ `r a8` (ambos en el borde
+**Conclusión.** Holt lineal con $\alpha=\beta=$ `r a8` (ambos en el borde
 superior de la rejilla) logra MASE de validación
 `r round(ej8$medidas_fuera$MASE,3)`, más de cuatro veces mejor que el ingenuo
 (`r round(ej8$medidas_referente$MASE,3)`). Que el óptimo caiga en el borde
@@ -527,8 +527,8 @@ knitr::kable(dplyr::bind_rows(
   dplyr::mutate(ejc$medidas_referente, tramo = "ingenuo estacional")), digits = 3)
 ejc$validacion$grafico_errores
 ejc$validacion$correlograma
-invisible(reportar_prueba(ejc$validacion$pruebas$ljung_box,
-  lectura = "Los errores de un paso conservan toda la tendencia y toda la estacionalidad de la serie: el método no extrajo la señal."))
+reportar_validacion(ejc, lecturas = list(
+  ljung_box = "Los errores de un paso conservan toda la tendencia y toda la estacionalidad de la serie: el método no extrajo la señal."))
 ejc$grafico_final
 ```
 
@@ -554,7 +554,7 @@ knitr::kable(dplyr::bind_rows(
   fila(ej3, sprintf("alpha = %.2f", a3)), fila(ej4, sprintf("k = %d", k4)),
   fila(ej5, "MCO, 2 coef."), fila(ej6, "MCO, 3 coef."),
   fila(ej7, "MCO en logaritmos"), fila(ej8, sprintf("alpha = %.2f, beta = %.2f", a8, b8)),
-  fila(ejc, "contraejemplo")), digits = 3)
+  fila(ejc, "contraejemplo")), digits = 3)  
 ```
 
 ```{r sesion}
